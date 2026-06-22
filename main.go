@@ -22,6 +22,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
 	platform       string
+	jwtSecret      string
 }
 
 type errResponse struct {
@@ -33,6 +34,7 @@ type User struct {
 	Email     string    `json:"email"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	Token     string    `json:"token"`
 }
 
 type Chirp struct {
@@ -42,6 +44,8 @@ type Chirp struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+const hourExp = 60 * 60
 
 func main() {
 	err := godotenv.Load()
@@ -54,7 +58,7 @@ func main() {
 	dbQueries := database.New(db)
 	mux := http.NewServeMux()
 
-	apiCfg := &apiConfig{dbQueries: dbQueries, platform: os.Getenv("PLATFORM")}
+	apiCfg := &apiConfig{dbQueries: dbQueries, platform: os.Getenv("PLATFORM"), jwtSecret: os.Getenv("JWT_SECRET")}
 
 	fileHandler := http.StripPrefix("/app/", http.FileServer(http.Dir(".")))
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(fileHandler))
@@ -91,8 +95,9 @@ func handleHealth(rw http.ResponseWriter, _ *http.Request) {
 func (cfg *apiConfig) handleLogin(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json; charset=utf-8")
 	type parameters struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email            string `json:"email"`
+		Password         string `json:"password"`
+		ExpiresInSeconds *int   `json:"expires_in_seconds"`
 	}
 	var params parameters
 	decoder := json.NewDecoder(r.Body)
@@ -100,6 +105,9 @@ func (cfg *apiConfig) handleLogin(rw http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		renderError(err, 400, rw)
 		return
+	}
+	if params.ExpiresInSeconds == nil || *params.ExpiresInSeconds > hourExp {
+		params.ExpiresInSeconds = new(hourExp)
 	}
 	user, err := cfg.dbQueries.GetUserByEmail(r.Context(), params.Email)
 	if err != nil {
@@ -116,7 +124,13 @@ func (cfg *apiConfig) handleLogin(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rw.WriteHeader(200)
-	data, err := json.Marshal(User{ID: user.ID, Email: user.Email, CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt})
+	jwt, err := auth.MakeJWT(user.ID, cfg.jwtSecret, time.Duration(*params.ExpiresInSeconds)*time.Second)
+	if err != nil {
+		renderError(err, 400, rw)
+		return
+	}
+
+	data, err := json.Marshal(User{ID: user.ID, Email: user.Email, CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt, Token: jwt})
 	_, _ = rw.Write(data)
 }
 
@@ -182,14 +196,23 @@ func (cfg *apiConfig) handleGetChirp(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) handleCreateChirp(rw http.ResponseWriter, r *http.Request) {
+	bearerToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		renderError(err, 401, rw)
+		return
+	}
+	UserID, err := auth.ValidateJWT(bearerToken, cfg.jwtSecret)
+	if err != nil {
+		renderError(err, 401, rw)
+		return
+	}
 	rw.Header().Set("Content-Type", "application/json; charset=utf-8")
 	type parameters struct {
-		Body   string    `json:"body"`
-		UserID uuid.UUID `json:"user_id"`
+		Body string `json:"body"`
 	}
 	var params parameters
 	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		renderError(err, 400, rw)
 		return
@@ -198,9 +221,10 @@ func (cfg *apiConfig) handleCreateChirp(rw http.ResponseWriter, r *http.Request)
 		renderError(fmt.Errorf("Chirp is too long"), 400, rw)
 		return
 	}
-	chirp, err := cfg.dbQueries.CreateChirp(r.Context(), database.CreateChirpParams{Body: params.Body, UserID: params.UserID})
+	chirp, err := cfg.dbQueries.CreateChirp(r.Context(), database.CreateChirpParams{Body: params.Body, UserID: UserID})
 	if err != nil {
 		renderError(err, 400, rw)
+		return
 	}
 	rw.WriteHeader(201)
 	data, err := json.Marshal(Chirp{ID: chirp.ID, Body: CleanChirp(chirp.Body), UserID: chirp.UserID, CreatedAt: chirp.CreatedAt, UpdatedAt: chirp.UpdatedAt})
