@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
@@ -57,4 +59,22 @@ func GetBearerToken(headers http.Header) (string, error) {
 		return "", fmt.Errorf("authorization header is not in the correct format %v", parts)
 	}
 	return parts[1], nil
+}
+
+func GetAPIKey(headers http.Header) (string, error) {
+	h := headers.Get("Authorization")
+	if h == "" {
+		return "", fmt.Errorf("authorization header not found")
+	}
+	parts := strings.Split(h, " ")
+	if len(parts) != 2 {
+		return "", fmt.Errorf("authorization header is not in the correct format %v", parts)
+	}
+	return parts[1], nil
+}
+
+func MakeRefreshToken() string {
+	key := make([]byte, 32)
+	_, _ = rand.Read(key)
+	return hex.EncodeToString(key)
 }

@@ -2,7 +2,10 @@
 <project version="4">
   <component name="SqlDialectMappings">
     <file url="file://$PROJECT_DIR$/sql/queries/chirps.sql" dialect="GenericSQL" />
+    <file url="file://$PROJECT_DIR$/sql/queries/refresh_tokens.sql" dialect="GenericSQL" />
     <file url="file://$PROJECT_DIR$/sql/schema/002_chirps.sql" dialect="GenericSQL" />
     <file url="file://$PROJECT_DIR$/sql/schema/003_add_users_hashed_password.sql" dialect="GenericSQL" />
+    <file url="file://$PROJECT_DIR$/sql/schema/004_refresh_tokens.sql" dialect="GenericSQL" />
+    <file url="file://$PROJECT_DIR$/sql/schema/005_add_users_is_chirpy_red.sql" dialect="GenericSQL" />
   </component>
 </project>
